@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jun  8 15:41:50 2019
+
+@author: intimantripp
+"""
+
+#Laplace distribution analysis
+
+from scipy.stats import laplace
+from scipy.stats import kurtosis
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
+from scipy.stats import expon
+import numpy as np
+
+def Laplace_func(x, mu, beta):
+    t = (x - mu)/beta
+    q = t >= 0
+    z = q.astype(int) - np.sign(t)*0.5*np.exp(-np.sign(t)*t)
+    return z
+
+def Laplace_func_2(x, alpha, beta):
+    n = len(x)
+    z = np.zeros(n)
+    t = np.zeros(n)
+    for i in range(n):
+        t[i] = (x[i] - alpha)/beta
+        if t[i] < 0:
+            z[i] = 0.5 * np.exp(t[i])
+        else:
+            z[i] = 1 - 0.5*np.exp(-t[i])
+    return z
+
+
+def Cramer_Von(z):
+    n = len(z)
+    W_squared = 0
+    for i in range(n):
+        #W_squared = W_squared + (z[i] - (2*(i+1) - 1)/(2*n))**2
+        W_squared = W_squared + (z[i] - (2 * i + 1)/(2 * n))**2
+    W_squared = W_squared + 1/(12*n)
+    return W_squared
+
+def Anderson_Darling(z):
+    n = len(z)
+    summ = 0
+    a_vals = np.zeros(n)
+    for i in range(n):
+        a_vals[i] = (2*i+1) * (np.log(z[i]) + np.log(1 - z[n - i - 1]))
+        summ = summ + (2*i+1) * (np.log(z[i]) + np.log(1 - z[n - i - 1]))
+    a_squared = -n  - 1/n * summ
+    return a_squared
+
+    #### Jarque bera test for normality
+
+
+jakob_df_near = jakob_df_near
+oib_swath_diff_jakob = jakob_df_near['Oib_Swath_Diff']
+n = len(oib_swath_diff_jakob)
+
+
+
+
+mu_jakob = np.median(oib_swath_diff_jakob)
+rate_jakob = 1/n * np.sum(np.abs(oib_swath_diff_jakob - mu_jakob))
+x_grid = np.linspace(-80, 40, 500)
+plt.hist(jakob_df_near['Oib_Swath_Diff'], bins = 1000, density = True)
+plt.plot(x_grid, laplace.pdf(x_grid, mu_jakob, rate_jakob))
+plt.show()
+
+
+kurtosis(oib_swath_diff_jakob)
+
+
+z_values = Laplace_func_2(oib_swath_diff_jakob, mu_jakob, rate_jakob)
+
+
+W_squared = Cramer_Von(z_values)
+A_squared = Anderson_Darling(z_values)
+
+U_squared = W_squared - n*(np.mean(z_values) - 1/2)**2
+    
+
+### Test cases
+
+test_data = np.array([99,85, 95, 89, 102, 100, 98, 97, 104,114, 111, 98, 99, 102,
+                     91,95,111,104,97,98,102,109, 88,91,103,94,105, 103,96,
+                     100, 101, 98, 97,97, 101, 102, 98, 94, 100, 98, 99, 92, 102,
+                     87, 99, 62, 92, 100, 96, 98, 66, 117, 132, 111, 107, 85, 89,
+                     79, 91, 97, 138, 103,111, 86, 78, 96,93, 101, 102,110, 95, 96,
+                     88, 122, 115, 92, 137, 91,84,96, 97,100,105,104, 137, 80, 104,
+                     104,106,84, 92,86, 103, 132, 94, 99, 102, 101, 104, 107])
+
+plt.hist(test_data, density = True, bins = 50)
+test_z = Laplace_func(test_data, mu = np.median(test_data),
+                      beta = 1/100 * np.sum(np.abs(test_data - np.median(test_data))))  
+
+
+test_z_2 = Laplace_func_2(np.sort(test_data), alpha = np.median(test_data), 
+                          beta = 8.33)
+W_test = Cramer_Von(test_z_2)
+
+np.sort(test_z_2)
+a_test = Anderson_Darling(test_z_2)
+np.log(1 - test_z_2)
+
+## Random Laplace Regression on Jakob data
+
+
+alpha = np.median(oib_swath_diff_jakob)
+mu = np.mean(oib_swath_diff_jakob)
+beta = 1/n * np.sum(np.abs(oib_swath_diff_jakob) - alpha)
+
+laplace_preds_jakob = np.repeat(alpha, repeats = n)
+laplace_preds_jakob_mu = np.repeat(mu, repeats = n)
+
+plt.hist(laplace_preds_jakob, density = True, bins = 500, color = 'b')
+plt.hist(oib_swath_diff_jakob, density = True, bins = 500)
+plt.show
+
+metrics.mean_squared_error(laplace_preds_jakob, oib_swath_diff_jakob)
+metrics.mean_squared_error(laplace_preds_jakob_mu 
+                           + np.random.laplace(loc = 0, scale = beta), oib_swath_diff_jakob)
+
+
+
+# Predict the mean of areas
+
+y_jakob = np.repeat(np.mean(oib_swath_diff_jakob), len(oib_swath_diff_jakob))
+y_southeast = np.repeat(np.mean(southeast_df_near["Oib_Swath_Diff"]), len(southeast_df_near))
+y_stor = np.repeat(np.mean(stormstrom_df_near["Oib_Swath_Diff"]), len(stormstrom_df_near))
+
+y_mean_area = np.concatenate((y_jakob, y_southeast, y_stor))
+
+#Use jakob and south east to predict Storstrommen
+
+X = pd.concat([jakob_df_near, southeast_df_near])
+X_train = X.drop(['Oib_Swath_Diff', 'Elev_Oib'], axis = 1)
+X_test = stormstrom_df_near.drop(["Oib_Swath_Diff", 'Elev_Oib'], axis = 1)
+
+
+regressor = LinearRegression(normalize = True)
+regressor.fit(X_train, np.concatenate((y_jakob, y_southeast)))
+
+pd.DataFrame(regressor.coef_, X_train.columns, columns = ['Coefficient'])
+y_preds = regressor.predict(X_test)
+
+plt.hist(y_preds, bins = 500)
+plt.hist(y_stor, alpha = 0.5)
+
+metrics.mean_squared_error(y_preds, y_stor)
+
+metrics.mean_squared_error(y_preds, stormstrom_df_near['Oib_Swath_Diff'])
+
+regressor = LinearRegression(normalize=True)
+regressor.fit(df_near_train, oib_train)
+
+oib_reg_coeffs = pd.DataFrame(regressor.coef_, df_near_reg.columns, columns = ['Coefficient'])
+
+y_reg_pred = regressor.predict(df_near_test)
+
+pd.DataFrame({'Actual': oib_test, 'Predicted': y_reg_pred})
+
+oib_reg_mse = metrics.mean_squared_error(oib_test, y_reg_pred)
+
+np.std(df_near['Oib_Swath_Diff'])
+np.sum(np.abs(df_near['Oib_Swath_Diff'])>3*np.std(df_near['Oib_Swath_Diff']))/len(df_near)
+
+## Now add new variable - did they underestimate or overestimate
+
+jakob_df_near['Zone'] = 1
+southeast_df_near['Zone'] = 2
+stormstrom_df_near['Zone'] = 3
+
+X = pd.concat([jakob_df_near, southeast_df_near], axis = 0)
+X_train = X.drop(['Oib_Swath_Diff', 'Elev_Oib', 'Zone'], axis = 1)
+X_test = stormstrom_df_near.drop(['Oib_Swath_Diff', 'Elev_Oib', 'Zone'], axis = 1)
+
+y_train = X['Oib_Swath_Diff'] > 0
+y_train = y_train.astype(int)
+y_test = stormstrom_df_near['Oib_Swath_Diff'] > 0
+y_test = y_test.astype(int)
+
+X['Under_Est'] = y_train
+
+np.mean(y_train)
+np.mean(y_test)
+np.mean((southeast_df_near['Oib_Swath_Diff']>0).astype(int))
+np.mean((jakob_df_near['Oib_Swath_Diff']>0).astype(int))
+
+plt.hist((jakob_df_near['Oib_Swath_Diff']>0).astype(int))
+plt.hist((southeast_df_near['Oib_Swath_Diff']>0).astype(int))
+plt.hist(y_test)
+plt.show()
+
+for i in range(len(X.columns)):
+    plt.scatter(X.iloc[:,i], X['Under_Est'])
+    plt.ylabel('Under_Est')
+    plt.xlabel(list(X)[i])
+    plt.show()
+    
+for i in range(len(X.columns)):
+    plt.scatter((X.loc[X['Zone']==1]).iloc[:,i], (X.loc[X['Zone']==1])['Under_Est'])
+    plt.ylabel('Under_Est')
+    plt.xlabel(list(X)[i])
+    plt.show()
+
+    
+plt.scatter(jakob_df_near.iloc[:,i], jakob_df_near["Elev_Oib"])
+
+#Logistic Regression?
+log_reg = LogisticRegression()
+log_reg.fit(X_train, y_train)
+
+y_pred = log_reg.predict(X_test)
+
+log_reg.score(X_test, y_test)
+log_reg.score(X_train, y_train)
+
+np.mean(y_test)
+np.mean(y_train)
+
+ 
+#RandomForest
+rf = RandomForestClassifier(n_estimators = 100, random_state = 42, max_depth = 2,
+                               verbose = 1)
+rf.fit(X_train, y_train)
+
+predictions = rf.predict(X_test)
+rf_oib_mse = metrics.mean_squared_error(y_test_oib, predictions_oib)
+rf.score(X_test, y_test)
+np.mean(y_test)
+
+np.mean(y_train)
+rf.score(X_train, y_train)
+rf.feature_importances_
+
+
+#NNClassifier
+X_train_nn = scalar.transform(X_train)
+X_test_nn = scalar.transform(X_test)
+
+mlp = MLPClassifier(hidden_layer_sizes=(40, 40, 40), max_iter = 500)
+mlp.fit(X_train_nn, y_train)
+mlp_preds = mlp.predict(X_test_nn)
+np.mean(mlp_preds)
+mlp.score(X_test_nn, y_test)
+
+np.mean(mlp_preds)
+np.mean(y_test)
+
+
+# Been predicting the wrong thing. Lets just predict the rate parameter
+
+#Create df_near with all observation that correspond to no penetration occurring removed
+# i.e. 'Under_Est' = 0
+
+X['Under_Est'] = (X['Oib_Swath_Diff']>0).astype(int)
+X_under_est = X[X['Under_Est']==1]
+X_train_underest = X_under_est.drop(['Zone', 'Oib_Swath_Diff', 'Under_Est'], axis = 1)
+
+plt.hist(X_under_est['Oib_Swath_Diff'], density = True, bins = 1000)
+plt.plot(np.linspace(0, 60, 1000), 
+         expon.pdf(np.linspace(0, 60, 1000), loc = 0, 
+                   scale = np.mean(X_under_est['Oib_Swath_Diff'])))
+plt.show()
+
+rate_jakob = 1/y_jakob
+rate_southeast = 1/y_southeast
+rate_stor = 1/y_stor
+
+y_train_underest = np.concatenate((np.repeat(rate_jakob, 59969),
+                                   np.repeat(rate_southeast,46467)))
+y_test = rate_stor
+type(np.repeat(rate_jakob, 59969))
+#Linear regression predictions of rates
+
+regressor = LinearRegression(normalize = True)
+regressor.fit(X_train_underest, y_train_underest)
+
+len(X_train)
+len(X_train_underest)
+len(y_train_underest)
+
+#########################
+y_jakob = np.repeat(np.mean(oib_swath_diff_jakob), len(oib_swath_diff_jakob))
+y_southeast = np.repeat(np.mean(southeast_df_near["Oib_Swath_Diff"]), len(southeast_df_near))
+y_stor = np.repeat(np.mean(stormstrom_df_near["Oib_Swath_Diff"]), len(stormstrom_df_near))
+
+np.sum(oib_swath_diff_jakob > 0) + np.sum(southeast_df_near["Oib_Swath_Diff"] > 0)
+
+
+
+
+
+regressor = LinearRegression(normalize=True)
+regressor.fit(df_near_train, oib_train)
+
+oib_reg_coeffs = pd.DataFrame(regressor.coef_, df_near_reg.columns, columns = ['Coefficient'])
+
+y_reg_pred = regressor.predict(df_near_test)
+
+pd.DataFrame({'Actual': oib_test, 'Predicted': y_reg_pred})
+
+oib_reg_mse = metrics.mean_squared_error(oib_test, y_reg_pred)
+
+np.std(df_near['Oib_Swath_Diff'])
+np.sum(np.abs(df_near['Oib_Swath_Diff'])>3*np.std(df_near['Oib_Swath_Diff']))/len(df_near)
+
+
+
+
+
