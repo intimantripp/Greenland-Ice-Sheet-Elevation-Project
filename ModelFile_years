@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jun 18 14:42:49 2019
+
+@author: intimantripp
+"""
+
+import os
+import numpy as np
+import glob
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split 
+from sklearn.linear_model import LinearRegression
+from sklearn import metrics
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPRegressor  
+from sklearn.ensemble import RandomForestRegressor
+from sklearn import svm
+import pystan
+from sklearn.linear_model import BayesianRidge, LinearRegression
+from sklearn.linear_model import LogisticRegression
+from scipy.stats import kurtosis
+
+def ObtainDict (path):
+    extension = 'csv'
+    os.chdir(path)
+    file_names = glob.glob('*.{}'.format(extension))
+    df_dict = {}
+    for i in range(len(file_names)):
+        df_dict[str(file_names[i].replace(".csv", ""))] = pd.read_csv(file_names[i])
+    
+    return df_dict
+
+
+
+
+def RefineData(df):
+    df = df.drop(['DemDiff_Swath', 'DemDiffMad_Swath', 'DemDiff_SwathOverPoca',
+                     'MeanDiffSpread_Swath', 'Elev_Oib', 'Lat_Swath', 'Lon_Swath', 'X_Swath',
+                     'Y_Swath', 'StartTime_Swath','Wf_Number_Swath'], axis = 1)
+    df = df.drop(["Unnamed: 0"], axis = 1)
+    
+    return df    
+
+def ObtainPredictions(X_train, X_test, y_train, model, scale = False):
+    
+    if scale == True:
+        scaler = StandardScaler()
+        scaler.fit(X_train)
+        X_train = scaler.transform(X_train)
+        X_test = scaler.transform(X_test)
+        
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    print(X_train.columns)
+    print(model.feature_importances_)
+    return predictions
+    
+def ObtainTargets(df):
+    
+    y_diff = df['Elev_Oib'] - df['Elev_Swath']
+    y_oib = df['Elev_Oib']
+    return [y_diff, y_oib]
+    
+
+
+
+def RefineCoh(df):
+    df = df.drop(df.index[(df['Coh_Swath']<0.8)], axis = 0)
+    
+    return df
+
+
+    
+
+def GeneralEval(data_dict, model, scale = False, refine_coh = False):
+    
+    df = pd.concat(data_dict)
+    if refine_coh:
+        df = RefineCoh(df)
+    y_list = ObtainTargets(df)
+    df = RefineData(df)
+    
+    X_train, X_test, y_train, y_test = train_test_split(df, y_list[0], test_size = 0.2,
+                                                        random_state = 42)
+    preds_diff = ObtainPredictions(X_train, X_test, y_train, model, scale)
+    mse_diff = metrics.mean_squared_error(y_test, preds_diff)
+    
+    X_train, X_test, y_train, y_test = train_test_split(df, y_list[1], test_size = 0.2,
+                                                        random_state = 42)
+    #preds_oib = ObtainPredictions(X_train, X_test, y_train, model, scale)
+    #mse_oib = metrics.mean_squared_error(y_test, preds_oib)
+    
+    mse_oib_diffs = metrics.mean_squared_error(y_test, X_test['Elev_Swath']+preds_diff)
+    
+    base = metrics.mean_squared_error(y_test, X_test['Elev_Swath'])
+    
+    results = np.sqrt([mse_diff, mse_oib_diffs, base]) 
+   
+    return results
+    
+
+def ObtainRegions(df_dict):
+    
+    df_jakob = pd.concat({key:value for key,value in df_dict.items() if key.find("jakobshavn")==0})
+    df_southeast = pd.concat({key:value for key,value in df_dict.items() if key.find("southeast")==0})
+    df_storm = pd.concat({key:value for key,value in df_dict.items() if key.find("stor")==0})
+
+    return [df_jakob, df_southeast, df_storm]
+
+
+def ObtainTargetsRegion(df_list):
+    y_list = []
+    for df in df_list:
+        y_diff = df['Elev_Oib'] - df['Elev_Swath']
+        y_oib = df['Elev_Oib']
+        y_list.append([y_diff, y_oib])
+        
+    return y_list
+
+def SingleRegionEval(data_dict, model, scale = False, refine_coh = False):
+    
+    
+    df_list = ObtainRegions(data_dict)
+    if refine_coh:
+        for i in range(len(df_list)):
+            df_list[i] = RefineCoh(df_list[i])
+    y_list = ObtainTargetsRegion(df_list)
+    results = {}
+    
+    n = len(df_list)
+    for i in range(n):
+
+        X_train = df_list[i]
+        X_train = RefineData(X_train)
+        X_test = pd.concat([df_list[k] for k in range(len(df_list)) if k != i])
+        X_test = RefineData(X_test)
+
+        y_train_diff = y_list[i][0]
+        print(kurtosis(y_train_diff))
+        y_test_diff = pd.concat([y_list[k][0] for k in range(len(y_list)) if k != i])
+        
+        y_train_oib = y_list[i][1]
+        y_test_oib = pd.concat([y_list[k][1] for k in range(len(y_list)) if k != i])
+ 
+        
+        preds_diff = ObtainPredictions(X_train, X_test, y_train_diff, model, scale)
+        mse_diff = metrics.mean_squared_error(y_test_diff, preds_diff)
+        
+        #preds_oib = ObtainPredictions(X_train, X_test, y_train_oib, model, scale)
+        #mse_oib = metrics.mean_squared_error(y_test_oib, preds_oib)
+        
+        mse_diff_oib = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath']+preds_diff)
+        
+        base = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath'])
+        
+        results[region_list[i]] = np.sqrt([mse_diff, mse_diff_oib, base])
+        
+    return results
+
+def DoubleRegionEval(data_dict, model, scale = False, refine_coh = False):
+    
+    df_list = ObtainRegions(data_dict)
+    if refine_coh:
+        for i in range(len(df_list)):
+            df_list[i] = RefineCoh(df_list[i])
+    y_list = ObtainTargetsRegion(df_list)
+    results = {}
+    n = len(df_list)
+    
+    for i in range(n):
+        
+        X_train = pd.concat([df_list[k] for k in range(len(df_list)) if k != i])
+        X_train = RefineData(X_train)
+        X_test = df_list[i]
+        X_test = RefineData(X_test)
+        
+        y_train_diff = pd.concat([y_list[k][0] for k in range(len(y_list)) if k != i])
+        y_test_diff = y_list[i][0]
+        
+        y_train_oib = pd.concat([y_list[k][1] for k in range(len(y_list)) if k != i])
+        y_test_oib = y_list[i][1]
+        
+        preds_diff = ObtainPredictions(X_train, X_test, y_train_diff, model, scale)
+        mse_diff = metrics.mean_squared_error(y_test_diff, preds_diff)
+        
+        #preds_oib = ObtainPredictions(X_train, X_test, y_train_oib, model, scale)
+        #mse_oib = metrics.mean_squared_error(y_test_oib, preds_oib)
+        
+        mse_diff_oib = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath'] + preds_diff)
+        
+        base = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath'])
+        
+        results['Not ' + region_list[i]] = np.sqrt([mse_diff, mse_diff_oib, base])
+    
+    return results
+
+
+
+def SingleYearEval(data_dict, model, scale = False, refine_coh = False):
+    
+    df_list = ObtainYears(data_dict)
+    if refine_coh:
+        for i in range(len(df_list)):
+            df_list[i] = RefineCoh(df_list[i])
+    
+    y_list = ObtainTargetsRegion(df_list)
+    results = {}
+    n = len(df_list)
+    
+    for i in range(n):
+        
+        X_train = pd.concat([df_list[k] for k in range(len(df_list)) if k != i])
+        X_train = RefineData(X_train)
+        X_test = df_list[i]
+        X_test = RefineData(X_test)
+        
+        y_train_diff = pd.concat([y_list[k][0] for k in range(len(y_list)) if k != i])
+        y_test_diff = y_list[i][0]
+        
+        y_train_oib = pd.concat([y_list[k][1] for k in range(len(y_list)) if k != i])
+        y_test_oib = y_list[i][1]
+        
+        preds_diff = ObtainPredictions(X_train, X_test, y_train_diff, model, scale)
+        mse_diff = metrics.mean_squared_error(y_test_diff, preds_diff)
+        
+        #preds_oib = ObtainPredictions(X_train, X_test, y_train_oib, model, scale)
+        #mse_oib = metrics.mean_squared_error(y_test_oib, preds_oib)
+        
+        mse_diff_oib = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath'] + preds_diff)
+        
+        base = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath'])
+        
+        results[str(2011 + i)] = np.sqrt([mse_diff, mse_diff_oib, base])
+    
+    return results
+
+def ObtainYears(data_dict):
+    data_list = []
+    for i in range(11, 17):
+        
+        data_list.append(pd.concat([data_dict[key] for key in data_dict.keys() if key.find(str(i)) > 0]))
+        #data_list.append(pd.concat([data_dict[key] for key in data_dict.keys() if key.find(str(i)) == 0]))
+        
+    return data_list
+
+ 
+def SingleYearSingleRegionEval(data_dict, model, scale = False, refine_coh = False):
+    
+    names_list = list(sorted(data_dict.keys()))
+    df_list = ObtainYearAndRegions(data_dict)
+    if refine_coh:
+        for i in range(len(df_list)):
+            df_list[i] = RefineCoh(df_list[i])
+    y_list = ObtainTargetsRegion(df_list)
+    results = {}
+    
+    n = len(df_list)
+    
+    for i in range(n):
+        
+        X_train = df_list[i]
+        X_train = RefineData(X_train)
+        X_test = pd.concat([df_list[k] for k in range(len(df_list)) if k != i])
+        X_test = RefineData(X_test)
+        
+        y_train_diff = y_list[i][0]
+        y_test_diff = pd.concat([y_list[k][0] for k in range(len(y_list)) if k != i])
+        
+        y_train_oib = y_list[i][1]
+        y_test_oib = pd.concat([y_list[k][1] for k in range(len(y_list)) if k != i])
+        
+        preds_diff = ObtainPredictions(X_train, X_test, y_train_diff, model, scale)
+
+        mse_diff = metrics.mean_squared_error(y_test_diff, preds_diff)
+        
+        #preds_oib = ObtainPredictions(X_train, X_test, y_train_oib, model, scale)
+        #mse_oib = metrics.mean_squared_error(y_test_oib, preds_oib)
+
+        mse_diff_oib = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath'] + preds_diff)
+        
+        base = metrics.mean_squared_error(y_test_oib, X_test['Elev_Swath'])
+        
+
+        results[str(names_list[i])] = np.sqrt([mse_diff, mse_diff_oib, base])
+        
+    return results
+        
+        
+def ObtainYearAndRegions(data_dict):
+    names_list = list(sorted(data_dict.keys()))
+    print(names_list)
+    df_list = []
+    
+    for i in range(len(names_list)):
+        df_list.append(data_dict[names_list[i]])
+        
+    return df_list
+
+### 1. Slice up the data in a number of ways to satisfy the models being built
+### 2. Pass them through the relevant models
+
+##############################################################################
+                          # Load data #
+##############################################################################
+dict_near = ObtainDict(path = '/Users/intimantripp/Desktop/Documents/University of Edinburgh/Summer Projects/Project 1/NearestPoints')
+dict_all = ObtainDict(path = '/Users/intimantripp/Desktop/Documents/University of Edinburgh/Summer Projects/Project 1/AllPoints')
+
+region_list = ['Jakob', 'Southeast', 'Storstrommen']
+
+##############################################################################
+                    # Linear Regression #
+##############################################################################
+
+## Near ###
+linear_regression = LinearRegression()
+general_linreg_near = GeneralEval(dict_near, model = linear_regression, scale = False)
+single_region_linreg_near = SingleRegionEval(dict_near, linear_regression, scale = False)
+double_region_linreg_near = DoubleRegionEval(dict_near, linear_regression, scale = False)
+single_year_linreg_near = SingleYearEval(dict_near, linear_regression, scale = False)
+single_year_single_region_linreg_near = SingleYearSingleRegionEval(dict_near, linear_regression, scale = False)
+
+
+## All ##
+
+general_linreg_all = GeneralEval(dict_all, model = linear_regression, scale = False)
+single_region_linreg_all = SingleRegionEval(dict_all, linear_regression, scale = False)
+double_region_linreg_all = DoubleRegionEval(dict_all, linear_regression, scale = False)
+single_year_linreg_all = SingleYearEval(dict_all, linear_regression, scale = False)
+single_year_single_region_linreg_all = SingleYearSingleRegionEval(dict_all, linear_regression, scale = False)
+
+## Coh ##
+
+general_linreg_coh = GeneralEval(dict_near, model = linear_regression, scale = False, refine_coh = True)
+general_linreg_coh_all = GeneralEval(dict_all, model = linear_regression, scale = False, refine_coh = True)
+single_region_linreg_coh = SingleRegionEval(dict_near, linear_regression, scale = False, refine_coh = True)
+double_region_linreg_coh = DoubleRegionEval(dict_near, linear_regression, scale = False, refine_coh = True)
+single_year_linreg_coh = SingleYearEval(dict_near, linear_regression, scale = False, refine_coh = True)
+single_year_single_region_linreg_coh = SingleYearSingleRegionEval(dict_near, linear_regression, scale = False, refine_coh = True)
+
+
+##############################################################################
+                    # MLP Regressor #
+##############################################################################
+
+mlp = MLPRegressor(hidden_layer_sizes = (12, 12), max_iter = 500, verbose = 1)
+
+## Near ##
+general_mlp_near = GeneralEval(dict_near, model = mlp, scale = True)
+single_region_mlp_near = SingleRegionEval(dict_near, model = mlp, scale = True)
+double_region_mlp_near = DoubleRegionEval(dict_near, model = mlp, scale = True)
+single_year_mlp_near = SingleYearEval(dict_near, mlp, scale = True)
+single_year_single_region_mlp_near = SingleYearSingleRegionEval(dict_near, mlp, scale = True)
+
+## All ##
+general_mlp_all = GeneralEval(dict_all, model = mlp, scale = True)
+single_region_mlp_all = SingleRegionEval(dict_all, model = mlp, scale = True)
+double_region_mlp_all = DoubleRegionEval(dict_all, model = mlp, scale = True)
+single_year_mlp_all = SingleYearEval(dict_all, mlp, scale = True)
+
+## NOT RUN ##
+single_year_single_region_mlp_all = SingleYearSingleRegionEval(dict_all, mlp, scale = True)
+
+## Coh ##
+
+general_mlp_coh = GeneralEval(dict_near, model = mlp, scale = True, refine_coh = True)
+general_mlp_coh_all = GeneralEval(dict_all, model = mlp, scale = True, refine_coh = True)
+single_region_mlp_coh = SingleRegionEval(dict_near, mlp, scale = True, refine_coh = True)
+single_region_mlp_coh_all = SingleRegionEval(dict_all, mlp, scale = True, refine_coh = True)
+double_region_mlp_coh = DoubleRegionEval(dict_near, mlp, scale = True, refine_coh = True)
+double_region_mlp_coh_all = DoubleRegionEval(dict_all, mlp, scale = True, refine_coh = True)
+single_year_mlp_coh = SingleYearEval(dict_near, mlp, scale = True, refine_coh = True)
+single_year_mlp_coh_all = SingleYearEval(dict_all, mlp, scale = True, refine_coh = True)
+
+##############################################################################
+                       # Random Forest #
+##############################################################################
+
+
+rf = RandomForestRegressor(n_estimators = 50, random_state = 42, min_samples_split = 2, verbose = 1)
+
+ ## Near ##
+general_rf_near = GeneralEval(dict_near, model = rf, scale = False)
+single_region_rf_near = SingleRegionEval(dict_near, model = rf, scale = False)
+double_region_rf_near = DoubleRegionEval(dict_near, model = rf, scale = False)
+
+ ## All ##
+general_rf_all = GeneralEval(dict_all, model = rf, scale = True)
+single_region_rf_all = SingleRegionEval(dict_all, model = rf, scale = True)
+double_region_rf_all = DoubleRegionEval(dict_all, model = rf, scale = True)
+single_year_rf_all = SingleYearEval(dict_all, model = rf, scale = True)
+
+## NOT RUN ##
+single_year_single_region_rf_all = SingleYearSingleRegionEval(dict_all, model = rf, scale = True)
+
+
+## Coh ##
+
+general_rf_coh = GeneralEval(dict_near, model = rf, scale = False, refine_coh = True)
+general_rf_coh_all = GeneralEval(dict_all, model = rf, scale = False, refine_coh = True)
+single_region_rf_coh = SingleRegionEval(dict_near, rf, scale = False, refine_coh = True)
+single_region_rf_coh_all = SingleRegionEval(dict_all, rf, scale = False, refine_coh = True)
+double_region_rf_coh = DoubleRegionEval(dict_near, rf, scale = False, refine_coh = True)
+double_region_rf_coh_all = DoubleRegionEval(dict_all, rf, scale = False, refine_coh = True)
+single_year_rf_coh = SingleYearEval(dict_near, rf, scale = False, refine_coh = True)
+single_year_rf_coh_all = SingleYearEval(dict_all, rf, scale = False, refine_coh = True)
+
+##############################################################################
+                     # Bayesian Regression #
+##############################################################################
+
+bayes_ridge = BayesianRidge(compute_score=True)
+
+general_bayes_near = GeneralEval(dict_near, model = bayes_ridge, scale = False)
+single_region_bayes_near = SingleRegionEval(dict_near, model = bayes_ridge, scale = False)
+double_region_bayes_near = DoubleRegionEval(dict_near, model = bayes_ridge, scale = False)
+single_year_single_region_bayes_near = SingleYearSingleRegionEval(dict_near, bayes_ridge, scale = False)
+
+        
+##############################################################################
+                             # SVR #
+##############################################################################
+                       
+                       
+svr_rbf = svm.SVR(kernel='rbf', verbose = 1)
+
+
+general_svr_rbf_near = GeneralEval(dict_near, model = svr_rbf, scale = True)
+single_region_svr_rbf_near = SingleRegionEval(dict_near, model = svr_rbf, scale = True)
+double_region_svr_rbf_near = DoubleRegionEval(dict_near, model = svr_rbf, scale = True)
+single_year_single_region_svr_rbf_near = SingleYearSingleRegionEval(dict_near, svr_rbf, scale = True)
+
+
+##############################################################################
+                             # Details #
+##############################################################################    
+
+def ObtainDictionaryMeans(dictionary):
+    keys = list(dictionary.keys())
+    temp = 0
+    for key in keys:
+        temp += dictionary[key]
+    return temp
+ 
+single_year_mlp_near_means = ObtainDictionaryMeans(single_year_mlp_near)/6
+
+single_year_rf_all_means = ObtainDictionaryMeans(single_year_rf_all)/6
+single_year_mlp_all_means = ObtainDictionaryMeans(single_year_mlp_all)/6
+single_year_single_region_mlp_near_means = ObtainDictionaryMeans(single_year_single_region_mlp_near)/6
+single_year_rf_coh_all_means = ObtainDictionaryMeans(single_year_rf_coh_all)/6
+single_year_mlp_coh_means = ObtainDictionaryMeans(single_year_mlp_coh)/6
+single_year_rf_coh_means = ObtainDictionaryMeans(single_year_rf_coh)/6
+single_year_mlp_coh_all_means = ObtainDictionaryMeans(single_year_mlp_coh_all)/6
+single_year_rf_coh_all_means = ObtainDictionaryMeans(single_year_rf_coh_all)/6
+
+
+
+
+df_all = pd.concat(dict_all)
+(df_all['Elev_Oib']-df_all['Elev_Swath']).quantile((0.05, 0.95))
+    

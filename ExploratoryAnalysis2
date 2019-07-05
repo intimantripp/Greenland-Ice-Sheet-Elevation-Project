@@ -1,0 +1,459 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jun 13 16:19:13 2019
+
+@author: intimantripp
+"""
+
+import numpy as np
+import pandas as pd
+import os
+import glob
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split 
+from sklearn.linear_model import LinearRegression
+from sklearn import metrics
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPRegressor  
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor
+from scipy import stats
+from scipy.stats import laplace
+
+path_near = "/Users/intimantripp/Desktop/Documents/University of Edinburgh/Summer Projects/Project 1/NearestPoints"
+path_all = "/Users/intimantripp/Desktop/Documents/University of Edinburgh/Summer Projects/Project 1/AllPoints"
+extension = "csv"
+
+## To Do:
+# Examine how using only values with certain coherence varies
+# Take mean of values from all dataset and use these for error - eliminates outliers hopefully, minor improvements
+# Examine proportion of overestimates
+# Normal distributed
+# Difference between near and all datasets error?
+# Compare different time zones
+# compare model's predictions of actual surface elevations to swath estimates
+# Try predicting elevations again just in case, with different models
+
+def draw_plot(data, edge_color, fill_color):
+    bp = ax.boxplot(data, patch_artist=True, showfliers = False)
+
+    for element in ['boxes', 'whiskers', 'fliers', 'means', 'medians', 'caps']:
+        plt.setp(bp[element], color=edge_color)
+
+    for patch in bp['boxes']:
+        patch.set(facecolor=fill_color)
+        
+    for median in bp['medians']:
+        median.set(color='#0D1315', linewidth=1)
+
+    for whisker in bp['whiskers']:
+        whisker.set(color='#7570b3', linewidth=2)
+
+##############################################################################
+                      # Load the Near data in #
+##############################################################################
+
+
+
+os.chdir(path_near)
+os.getcwd()
+
+file_names_near = glob.glob('*.{}'.format(extension))
+
+df_near_dict = {}
+for i in range(len(file_names_near)):
+    df_near_dict[str(file_names_near[i].replace(".csv",""))] = pd.read_csv(file_names_near[i])
+
+df_near = pd.concat(df_near_dict)
+
+df_near["Oib_Swath_Diff"] = df_near["Elev_Oib"] - df_near["Elev_Swath"]
+df_near = df_near.drop(["Unnamed: 0"], axis = 1)
+
+df_near_summary = df_near.describe()
+
+##############################################################################
+                      # Load the All data in #
+##############################################################################
+
+os.chdir(path_all)
+os.getcwd()
+
+
+file_names_all = glob.glob('*.{}'.format(extension))
+df_all_dict = {}
+for i in range(len(file_names_all)):
+    df_all_dict[str(file_names_all[i].replace(".csv", ""))] = pd.read_csv(file_names_all[i])
+
+df_all = pd.concat(df_all_dict)
+
+df_all["Oib_Swath_Diff"] = df_all['Elev_Oib'] - df_all['Elev_Swath']
+df_all = df_all.drop(["Unnamed: 0"], axis = 1)
+
+df_all_summary = df_all.describe()
+
+
+
+# Questions: How does error vary? Do any of the variables show any obvious correlation?
+#            How does the elevations vary across different regions? Is any region noticeably different?
+#            
+
+##############################################################################
+                      # General Findings #
+##############################################################################
+laplace_rate_near = 1/len(df_near['Oib_Swath_Diff']) * np.sum(np.abs(df_near['Oib_Swath_Diff'] - np.median(df_near['Oib_Swath_Diff'])))
+
+plt.hist(df_near['Oib_Swath_Diff'], bins = 500, range = [-20, 25], density = True, label = 'Swath Error')
+plt.plot(np.linspace(-20, 25, 1000),
+         laplace.pdf(np.linspace(-20, 25, 1000), np.median(df_near['Oib_Swath_Diff']),
+                     laplace_rate_near), label = 'Laplace')
+plt.xlabel('Swath Error (m)')
+plt.ylabel('Density')
+plt.legend(loc = 'upper right')
+plt.title('Density histogram of Swath Error with a Laplace distirbution overlaid')
+    
+fig, ax = plt.subplots()
+draw_plot(df_near['Oib_Swath_Diff'], '#7570b3', '#1f77b4')
+#plt.xlabel('Region')
+#plt.ylabel('Elevation (m)')
+#plt.title('Boxplots of OIB elevations across the 3 areas provided')
+plt.show()
+
+
+
+##############################################################################
+                      # Compare different areas #
+##############################################################################
+
+# 1. Load different areas into separate dataframes - NEAR
+                      
+dict_jakob_near = {key:value for key,value in df_near_dict.items() if key.find("jakobshavn")==0}
+df_jakob_near = pd.concat(dict_jakob_near)
+df_jakob_near['Oib_Swath_Diff'] = df_jakob_near['Elev_Oib'] - df_jakob_near['Elev_Swath']
+
+dict_southeast_near = {key:value for key,value in df_near_dict.items() if key.find("southeast")==0}
+df_southeast_near = pd.concat(dict_southeast_near)
+df_southeast_near['Oib_Swath_Diff'] = df_southeast_near['Elev_Oib'] - df_southeast_near['Elev_Swath']
+
+dict_storm_near = {key:value for key,value in df_near_dict.items() if key.find("stor")==0}
+df_storm_near = pd.concat(dict_storm_near)
+df_storm_near['Oib_Swath_Diff'] = df_storm_near['Elev_Oib'] - df_storm_near['Elev_Swath']
+
+dict_jakob_all = {key:value for key,value in df_all_dict.items() if key.find("jakobshavn")==0}
+df_jakob_all = pd.concat(dict_jakob_all)
+df_jakob_all['Oib_Swath_Diff'] = df_jakob_all['Elev_Oib'] - df_jakob_all['Elev_Swath']
+
+
+area_diffs_near = [df_jakob_near["Oib_Swath_Diff"], df_southeast_near["Oib_Swath_Diff"],
+                  df_storm_near["Oib_Swath_Diff"]]
+
+area_diffs = [df_jakob_all["Oib_Swath_Diff"], df_southeast_near["Oib_Swath_Diff"],
+                  df_storm_near["Oib_Swath_Diff"]]
+
+oib_diffs_near = [df_jakob_near["Elev_Oib"], df_southeast_near["Elev_Oib"],
+                  df_storm_near["Elev_Oib"]]
+
+df_jakob_near['Oib_Swath_Diff'].quantile([0.25, 0.75])
+df_southeast_near['Oib_Swath_Diff'].quantile([0.25, 0.75])
+
+plt.boxplot(area_diffs_near, showfliers = False)
+plt.xticks([1,2,3], ['Jakob', 'Southeast', 'Stormstrommen'])
+plt.show()
+
+def draw_plot(data, edge_color, fill_color):
+    bp = ax.boxplot(data, patch_artist=True, showfliers = False)
+
+    for element in ['boxes', 'whiskers', 'fliers', 'means', 'medians', 'caps']:
+        plt.setp(bp[element], color=edge_color)
+
+    for patch in bp['boxes']:
+        patch.set(facecolor=fill_color)  
+        
+    for median in bp['medians']:
+        median.set(color='#0D1315', linewidth=1)
+
+    for whisker in bp['whiskers']:
+        whisker.set(color='#7570b3', linewidth=2)
+
+### Boxplots of different areas
+fig, ax = plt.subplots()
+draw_plot(oib_diffs_near, '#7570b3', '#1f77b4')
+plt.xticks([1,2,3], ['Jakob', 'Southeast', 'Stormstrommen'])
+plt.xlabel('Region')
+plt.ylabel('Elevation (m)')
+plt.title('Boxplots of OIB elevations across the 3 areas provided')
+plt.show()
+
+
+fig, ax = plt.subplots()
+draw_plot(area_diffs_near, '#7570b3', '#1f77b4')
+plt.xticks([1,2,3], ['Jakob', 'Southeast', 'Stormstrommen'])
+plt.xlabel('Region')
+plt.ylabel('Swath Error (m)')
+plt.title('Boxplots of Swath Error across the 3 areas provided with outliers removed')
+plt.show()
+
+
+#Histogram of different areas
+plt.hist(area_diffs_near[0], density = True, bins = 500, alpha = 0.5, range=[-20, 25],
+         label = 'Jakob')
+plt.hist(area_diffs_near[1], density = True, bins = 500, alpha = 0.5, range=[-20, 25],
+         label = 'Southeast')
+plt.hist(area_diffs_near[2], density = True, bins = 500, alpha = 0.5, range=[-20, 25],
+         label = 'Stormstrommen')
+plt.axvline(x=0, color = 'black', alpha = 0.75, label = 'Zero')
+plt.legend(loc = 'upper right')
+plt.xlabel("Swath Error (m)")
+plt.ylabel('Density')
+plt.title('Density of Swath Error in the 3 different regions')
+plt.show()
+
+#Illustration of Error being Laplace distributed
+laplace_rate_jakob = 1/len(area_diffs_near[0]) * np.sum(np.abs(area_diffs_near[0]-np.median(area_diffs_near[0])))
+plt.hist(area_diffs_near[0], density = True, bins = 500, range = [-20, 25], label = 'Jakob')
+plt.plot(np.linspace(-25, 30, 1000), 
+         laplace.pdf(np.linspace(-25, 30, 1000), np.median(area_diffs_near[0]), laplace_rate_jakob),
+         label = 'Laplace')
+plt.xlabel('Swath Error')
+plt.ylabel('Density')
+plt.legend(loc = 'upper right')
+plt.title('Density of Swath Error in ')
+plt.show()
+
+laplace_rate_jakob_all = 1/len(df_jakob_all['Oib_Swath_Diff']) * np.sum(np.abs(df_jakob_all['Oib_Swath_Diff']) - np.median(df_jakob_all['Oib_Swath_Diff']))
+plt.hist(df_jakob_all['Oib_Swath_Diff'], density = True, bins = 500, range = [-25, 20], label = 'Jakob')
+plt.plot(np.linspace(-25, 20, 1000), laplace.pdf(np.linspace(-25, 20, 1000),
+                     np.median(df_jakob_all['Oib_Swath_Diff']),laplace_rate_jakob_all), label = 'Laplace')
+plt.xlabel('Swath Error')
+plt.ylabel('Density')
+plt.legend(loc = 'upper right')
+plt.title('Density of Swath Error for Jakob with a Laplace Distribution overlaid')
+plt.show()
+
+
+#Summary Stats
+
+np.median(oib_diffs_near[0])
+np.median(oib_diffs_near[1])
+np.median(oib_diffs_near[2])
+
+#############################################################################
+    # Compare different areas over days taking aggregate of years #
+##############################################################################
+
+
+plt.plot(df_jakob_near['DayInYear_Swath'], df_jakob_near['Oib_Swath_Diff'])
+plt.plot(df_southeast_near['DayInYear_Swath'], df_southeast_near['Oib_Swath_Diff'])
+
+### Calculating the error over days
+
+
+time_df_jakob = df_jakob_near[['DayInYear_Swath', 'Oib_Swath_Diff']].groupby('DayInYear_Swath').mean()
+time_df_southeast = df_southeast_near[['DayInYear_Swath', 'Oib_Swath_Diff']].groupby('DayInYear_Swath').mean()
+time_df_storm = df_storm_near[['DayInYear_Swath', 'Oib_Swath_Diff']].groupby('DayInYear_Swath').mean()
+
+plt.plot(time_df_jakob['Oib_Swath_Diff'])
+plt.plot(time_df_southeast['Oib_Swath_Diff'])
+plt.plot(time_df_storm['Oib_Swath_Diff'])
+plt.xlabel('Days after March 20th')
+plt.ylabel('Swath Error')
+plt.legend(('Jakob', 'Southeast', 'Storstrommen'), loc = 'upper right')
+plt.show()
+
+
+### Calculating the elevation over days
+
+
+days_df_jakob = df_jakob_near[['Elev_Oib', 'DayInYear_Swath']].groupby('DayInYear_Swath').mean()
+days_df_southeast = df_southeast_near[['Elev_Oib', 'DayInYear_Swath']].groupby('DayInYear_Swath').mean()
+days_df_storm = df_storm_near[['Elev_Oib', 'DayInYear_Swath']].groupby('DayInYear_Swath').mean()
+
+plt.plot(days_df_jakob['Elev_Oib'])
+
+#############################################################################
+    # Examine average error varies across years for different areas #
+##############################################################################
+
+def get_errors_over_time(dictionary):
+    stat_store = []
+    low_quant_store = []
+    upp_quant_store = []
+    for key in sorted(dictionary.keys()):
+        quantity = dictionary[key]['Elev_Oib'] - dictionary[key]['Elev_Swath']
+        stat_store.append(np.mean(quantity))
+        low_quant_store.append(np.quantile(quantity, 0.25))
+        upp_quant_store.append(np.quantile(quantity, 0.75))
+    return [stat_store, low_quant_store, upp_quant_store]
+
+
+def get_stats_over_time(dictionary, variable):
+    stat_store = []
+    low_quant_store = []
+    upp_quant_store = []
+    for key in sorted(dictionary.keys()):
+        quantity = dictionary[key][variable]
+        stat_store.append(np.mean(dictionary[key][variable]))
+        low_quant_store.append(np.quantile(quantity, 0.25))
+        upp_quant_store.append(np.quantile(quantity, 0.75))
+    return [stat_store, low_quant_store, upp_quant_store]
+
+#Error over years
+        
+yearly_error_stats_jakob = get_errors_over_time(dict_jakob_near)
+yearly_error_stats_southeast = get_errors_over_time(dict_southeast_near)        
+yearly_error_stats_storm = get_errors_over_time(dict_storm_near)        
+
+plt.plot(range(2011, 2017), yearly_error_stats_jakob[0], color = '#1f77b4', label = 'Jakob')
+plt.plot(range(2011, 2017), yearly_error_stats_jakob[1], '--', color = '#1f77b4', alpha = 0.4)
+plt.plot(range(2011, 2017), yearly_error_stats_jakob[2],'--', color = '#1f77b4', alpha = 0.4)
+
+plt.plot(range(2011, 2017), yearly_error_stats_southeast[0], color = '#ff7f0e', label = 'Southeast')
+plt.plot(range(2011, 2017), yearly_error_stats_southeast[1], '--', color = '#ff7f0e', alpha = 0.4)
+plt.plot(range(2011, 2017), yearly_error_stats_southeast[2], '--', color = '#ff7f0e', alpha = 0.4)
+         
+plt.plot(range(2011, 2017), yearly_error_stats_storm[0], color = '#2ca02c', label = 'Storstrømmen')
+plt.plot(range(2011, 2017), yearly_error_stats_storm[1], '--', color = '#2ca02c', alpha = 0.4)
+plt.plot(range(2011, 2017), yearly_error_stats_storm[2], '--', color = '#2ca02c', alpha = 0.4)
+plt.ylim((-2, 8))
+plt.legend(loc = 'upper right')
+plt.xlabel('Year')
+plt.ylabel('Swath Error')
+plt.title('Swath Error in each region from years 2011-2017')
+plt.show()
+         
+
+plt.plot(range(2011, 2017), yearly_error_stats_jakob[0], label = 'Jakob')
+plt.plot(range(2011, 2017), yearly_error_stats_southeast[0], label = 'Southeast')
+plt.plot(range(2011, 2017), yearly_error_stats_storm[0], label = 'Storstrømmen')
+plt.legend(loc = 'upper right')         
+
+
+# Elevation over years
+
+yearly_elev_jakob = get_stats_over_time(dict_jakob_near, ['Elev_Oib'])
+yearly_elev_southeast = get_stats_over_time(dict_southeast_near, ['Elev_Oib'])
+yearly_elev_storm = get_stats_over_time(dict_storm_near, ['Elev_Oib'])
+
+         
+plt.plot(range(2011, 2017), yearly_elev_jakob[0], color = '#1f77b4', label = 'Jakob')  
+plt.plot(range(2011, 2017), yearly_elev_jakob[1], '--', color = '#1f77b4', alpha=0.4)
+plt.plot(range(2011, 2017), yearly_elev_jakob[2],'--', color = '#1f77b4', alpha=0.4)
+
+plt.plot(range(2011, 2017), yearly_elev_southeast[0], color = '#ff7f0e', label = 'Southeast')
+plt.plot(range(2011, 2017), yearly_elev_southeast[1], '--', color = '#ff7f0e', alpha = 0.4)
+plt.plot(range(2011, 2017), yearly_elev_southeast[2], '--', color = '#ff7f0e', alpha = 0.4)
+         
+plt.plot(range(2011, 2017), yearly_elev_storm[0], color = '#2ca02c', label = 'Storstrømmen')
+plt.plot(range(2011, 2017), yearly_elev_storm[1], '--', color = '#2ca02c', alpha=0.4)
+plt.plot(range(2011, 2017), yearly_elev_storm[2], '--', color = '#2ca02c', alpha=0.4)
+plt.legend(loc = 'upper right')
+plt.xlabel('Year')
+plt.ylabel('Elevation (m)')
+plt.title('Elevation in the 3 different regions from 2011 to 2016')
+plt.show()
+
+##########################################################################
+            # Examining how Error varies with  all variables #
+##############################################################################
+
+plt.scatter(df_near['Coh_Swath'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.scatter(df_near['SampleNb_Swath'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.scatter(df_near['PowerScaled_SwathOverPoca'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.scatter(df_near['PowerScaled_Swath'], df_near['Oib_Swath_Diff'], s = 0.001)
+
+
+np.mean(df_near['Coh_Swath']>0.9)
+df_near[df_near['Coh_Swath']>0.9].std()
+
+for i in range(len(df_near.columns)):
+    plt.subplot(2,1,1)
+    plt.scatter(df_near.iloc[:,i], df_near['Oib_Swath_Diff'], s=0.001)
+    plt.ylabel('Oib_Swath_Diff')
+    plt.xlabel(list(df_near)[i])
+    plt.subplot(2,1,2)
+    plt.scatter(df_all.iloc[:,i], df_all['Oib_Swath_Diff'], s=0.001)
+    plt.ylabel('Oib_Swath_Diff')
+    plt.xlabel(list(df_all)[i])
+    plt.show()
+
+
+plt.scatter(df_near['Coh_Swath'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.scatter(df_near['SampleNb_Swath'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.scatter(df_near['PowerScaled_SwathOverPoca'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.scatter(df_near['PowerScaled_Swath'], df_near['Oib_Swath_Diff'], s = 0.001)
+
+np.std(df_near['PowerScaled_SwathOverPoca']>2)
+
+
+plt.scatter(df_near['Elev_Oib'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.ylabel('OIB Swath Difference')
+plt.xlabel('Swath Elevation')
+
+plt.scatter(df_near['Coh_Swath'], df_near['Oib_Swath_Diff'], s = 0.001)
+plt.ylabel('OIB Swath Difference')
+plt.xlabel('Swath Coherence')
+
+
+#############################################################################
+            # Examining how Elev_Oib varies with  all variables#
+##############################################################################
+
+
+
+for i in range(len(df_near.columns)):
+    plt.subplot(2,1,1)
+    plt.scatter(df_near.iloc[:,i], df_near['Elev_Oib'], s=0.001)
+    plt.ylabel('Elev_Oib')
+    plt.xlabel(list(df_near)[i])
+    plt.subplot(2,1,2)
+    plt.scatter(df_all.iloc[:,i], df_all['Elev_Oib'], s=0.001)
+    plt.ylabel('Elev_Oib')
+    plt.xlabel(list(df_all)[i])
+    plt.show()
+
+plt.scatter(df_near['Elev_Swath'], df_near['Elev_Oib'], s = 0.001)
+plt.xlabel('Swath Elevation (m)')
+plt.ylabel('OIB Elevation (m)')
+plt.title('Scatterplot of Swath Elevation estimates against OIB elevation estimates')
+plt.show()
+##############################################################################
+      # Identify proportion of overestimates vs underestimates #
+##############################################################################
+
+df_near['Under_Est'] = (df_near['Oib_Swath_Diff']>0).astype(int)
+np.mean(df_near['Under_Est'])
+
+df_all['Under_Est'] = (df_all['Oib_Swath_Diff']>0).astype(int)
+np.mean(df_all['Under_Est'])
+
+
+np.std(df_near['Oib_Swath_Diff'])
+np.std(df_all['Oib_Swath_Diff'])
+
+
+df_jakob_near['Under_Est'] = (df_jakob_near['Oib_Swath_Diff']>0).astype(int)
+np.mean(df_jakob_near['Under_Est'])
+
+df_southeast_near['Under_Est'] = (df_southeast_near['Oib_Swath_Diff']>0).astype(int)
+np.mean(df_southeast_near['Under_Est'])
+
+df_storm_near['Under_Est'] = (df_storm_near['Oib_Swath_Diff']>0).astype(int)
+np.mean(df_storm_near['Under_Est'])     
+
+##############################################################################
+                      # Jarque-Bera  #
+##############################################################################
+
+stats.jarque_bera(np.random.normal(0, 1, 10000))
+stats.jarque_bera(df_jakob_near['Oib_Swath_Diff']) #Fails test horrifically
+
+##############################################################################
+                      # Features relevant?  #
+##############################################################################
+
+
+
+
+
+# df_near.loc[df_near['Unnamed: 0']==0].index[0]
